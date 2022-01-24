@@ -1,0 +1,3 @@
+[submodule "pt-br"]
+	path = pt-br
+	url = https://github.com/fserb/pt-br.git
