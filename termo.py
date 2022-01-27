@@ -95,10 +95,12 @@ def main(args):
         # 1. Tenta gerar palavras com todas as letras restantes
         contador = Counter("".join(palavras))
         frequencias_ord = "".join(contador)
-        letras_usadas = (
-            list(args.excluir)
-            + [f[1] for f in args.fixar]
-            + [c[1] for c in args.contem]
+        letras_usadas = list(
+            set(
+                list(args.excluir)
+                + [f[1] for f in args.fixar]
+                + [c[1] for c in args.contem]
+            )
         )
         possibilidades = gerar_possibilidades(
             args.tamanho, excluir=letras_usadas, fixar={}, contem={}, talvez_contenha=[]
