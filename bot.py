@@ -13,20 +13,30 @@ TAMANHO = len(TENTATIVA_INICIAL)
 
 
 def procurar_palavras(comando, solucao):
-    comando = ["python", "termo.py", comando]
+    cmd = ["python", "termo.py", comando, "-m"]
+    if comando == "listar":
+        cmd += ["-o"]
     if len(solucao["excluir"]) > 0:
-        comando += ["--excluir"] + list(set(solucao["excluir"]))
+        cmd += ["--excluir"] + list(set(solucao["excluir"]))
     if len(solucao["fixar"]) > 0:
-        comando += ["--fixar"] + list(set(solucao["fixar"]))
+        cmd += ["--fixar"] + list(set(solucao["fixar"]))
     if len(solucao["contem"]) > 0:
         fixas = set([f[1] for f in solucao["fixar"]])
         contem = list(set([c for c in solucao["contem"] if c[1] not in fixas]))
         if len(contem) > 0:
-            comando += ["--contem"] + contem
-    print(" ".join(comando))
-    proc = run(comando, capture_output=True)
+            cmd += ["--contem"] + contem
+    print(" ".join(cmd))
+    proc = run(cmd, capture_output=True)
     if proc.returncode == 0:
-        return proc.stdout.decode("utf-8").strip().split("\n")
+        return list(
+            map(
+                lambda row: (row[0], float(row[1]), float(row[2])),
+                [
+                    p.split(" - ")
+                    for p in proc.stdout.decode("utf-8").strip().split("\n")
+                ],
+            )
+        )
     else:
         return None
 
@@ -52,6 +62,7 @@ async def main():
         await page.keyboard.type(f"{tentativa}\n")
         time.sleep(TAMANHO)
         corretas = 0
+        respostas = []
         for coluna in range(1, 6):
             cell = await page.querySelector(
                 f"#board div:nth-child({linha}) div:nth-child({coluna})"
@@ -67,7 +78,10 @@ async def main():
                 .removeprefix("JSHandle:")
             )
             if "wrong" in cell_class:
-                solucao["excluir"].append(f"{tentativa[coluna-1]}")
+                if tentativa.count(tentativa[coluna - 1]) == 1:
+                    solucao["excluir"].append(f"{tentativa[coluna-1]}")
+                else:
+                    pass
             elif "place" in cell_class:
                 solucao["contem"].append(f"{coluna}{tentativa[coluna-1]}")
             elif "right" in cell_class:
@@ -81,26 +95,23 @@ async def main():
             print("Achou!")
             break
         print("Procurando palavras...")
-        palavras = procurar_palavras("listar", solucao)
-        if palavras is None:
+        achados = procurar_palavras("listar", solucao)
+        if achados is None:
             print(f"Oh no! Erro no comando")
             break
-        elif len(palavras) == 0:
+        elif len(achados) == 0:
             print("Oh no! sem mais adivinhos")
             break
 
-        print(f"Encontrou {len(palavras)} palavras. Mais provaveis: {palavras[:5]}")
-        if len(palavras) == 1:
-            tentativa = palavras[0]
+        print(f"Encontrou {len(achados)} palavras. Mais provaveis: {achados[:5]}")
+        if len(achados) < 5 or achados[0][1] > 0.8 or linha == 6:
+            tentativa = achados[0][0]
         else:
             palavras_eliminar = procurar_palavras("eliminar", solucao)
             print(
                 f"Encontrou {len(palavras_eliminar)} palavras ótimas. Melhores opções: {palavras_eliminar[:5]}"
             )
-            if len(palavras_eliminar) < len(palavras):
-                tentativa = palavras[0]
-            else:
-                tentativa = palavras_eliminar[0]
+            tentativa = palavras_eliminar[0][0]
 
         print()
         print("tentativa:", tentativa)
