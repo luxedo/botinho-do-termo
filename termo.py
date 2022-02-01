@@ -21,7 +21,6 @@ TFLIST = LISTS_DIR + "tf_{n}.csv"
 WORDREPO = "pt-br/palavras"
 TFREPO = "pt-br/tf"
 FREQUENCIAS = "eitsanhurdmwgvlfbkopjxczyq"
-VOGAIS = "eiauo"
 
 
 def carregar_wordlist(tamanho, forcar):
@@ -74,23 +73,6 @@ def carregar_tf(tamanho, forcar):
         )
 
 
-def gerar_possibilidades(tamanho, excluir, fixar, contem, talvez_contenha):
-    dicio = [l for l in list(ascii_lowercase) if l not in excluir]
-    todas = [dicio for _ in range(tamanho)]
-    for i, c in fixar.items():
-        todas[i - 1] = [c]
-    possibilidades = ["".join(p) for p in product(*todas)]
-    possibilidades = [p for p in possibilidades if all([c[1] in p for c in contem])]
-    possibilidades = [
-        p for p in possibilidades if all([c[1] != p[c[0] - 1] for c in contem])
-    ]
-    if talvez_contenha:
-        possibilidades = [
-            p for p in possibilidades if any([t in p for t in talvez_contenha])
-        ]
-    return possibilidades
-
-
 def calcular_peso(palavra, ord_freq, tf):
     letras = set(palavra)
     return (
@@ -120,7 +102,19 @@ def log_softmax_coluna(achados, coluna):
     return list(zip(*transposto))
 
 
-def listar_palavras(possibilidades, wordlist, tf, ord_freq=None):
+def filtrar_wordlist(
+    wordlist, tf, tamanho, excluir, fixar, contem, talvez_contenha=None, ord_freq=None
+):
+    possibilidades = [p for p in wordlist if not any(l in p for l in excluir)]
+    possibilidades = [
+        p for p in possibilidades if all(f == p[i - 1] for i, f in fixar.items())
+    ]
+    possibilidades = [
+        p for p in possibilidades if all(c != p[i - 1] for i, c in contem)
+    ]
+    if talvez_contenha:
+        achados = [p for p in possibilidades if any([t in p for t in talvez_contenha])]
+
     if len(possibilidades) == 0:
         return []
     tamanho = len(possibilidades[0])
@@ -159,33 +153,40 @@ def mostrar_palavras(achados, mostrar_pesos, ordenar_tf):
     )
 
 
-def main(args):
-    wordlist = carregar_wordlist(args.tamanho, args.processar)
-    tf = carregar_tf(args.tamanho, args.processar)
-    possibilidades = gerar_possibilidades(
-        args.tamanho, args.excluir, dict(args.fixar), args.contem, []
-    )
-    achados = list(listar_palavras(possibilidades, wordlist, tf))
+def procurar(
+    comando,
+    tamanho,
+    processar,
+    excluir,
+    fixar,
+    contem,
+    mostrar_pesos=False,
+    ordenar_tf=False,
+):
+    wordlist = carregar_wordlist(tamanho, processar)
+    tf = carregar_tf(tamanho, processar)
+    achados = filtrar_wordlist(wordlist, tf, tamanho, excluir, dict(fixar), contem, [])
 
-    if args.comando[0] == "listar":
-        mostrar_palavras(achados, args.mostrar_pesos, args.ordenar_tf)
+    if comando[0] == "listar":
+        mostrar_palavras(achados, mostrar_pesos, ordenar_tf)
 
-    elif args.comando[0] == "eliminar":
+    elif comando[0] == "eliminar":
         # 1. Tenta gerar palavras com todas as letras restantes
         ord_freq = dict(Counter("".join([p[0] for p in achados])))
         letras_usadas = list(
-            set(
-                list(args.excluir)
-                + [f[1] for f in args.fixar]
-                + [c[1] for c in args.contem]
-            )
+            set(list(excluir) + [f[1] for f in fixar] + [c[1] for c in contem])
         )
-        possibilidades = gerar_possibilidades(
-            args.tamanho, excluir=letras_usadas, fixar={}, contem={}, talvez_contenha=[]
+        achados = filtrar_wordlist(
+            wordlist,
+            tf,
+            tamanho,
+            excluir=letras_usadas,
+            fixar={},
+            contem={},
+            talvez_contenha=[],
         )
-        achados = listar_palavras(possibilidades, wordlist, tf, ord_freq)
         if len(achados) != 0:
-            mostrar_palavras(achados, args.mostrar_pesos, args.ordenar_tf)
+            mostrar_palavras(achados, mostrar_pesos, ordenar_tf)
             return
 
         # 2. Remove letras da lista de exclusões por ordem de frequencia reversa
@@ -193,16 +194,17 @@ def main(args):
             if c in letras_usadas:
                 letras_usadas_vogal = letras_usadas[:]
                 letras_usadas_vogal.remove(c)
-                possibilidades = gerar_possibilidades(
-                    args.tamanho,
+                achados = filtrar_wordlist(
+                    wordlist,
+                    tf,
+                    tamanho,
                     excluir=letras_usadas_vogal,
                     fixar={},
                     contem={},
                     talvez_contenha=list(ord_freq),
                 )
-                achados = listar_palavras(possibilidades, wordlist, tf, ord_freq)
                 if len(achados) != 0:
-                    mostrar_palavras(achados, args.mostrar_pesos, args.ordenar_tf)
+                    mostrar_palavras(achados, mostrar_pesos, ordenar_tf)
                     return
 
         # 3. Ainda não pensei
@@ -259,4 +261,13 @@ if __name__ == "__main__":
         help="Mostra os pesos calculados para cada palavra",
     )
     args = parser.parse_args()
-    main(args)
+    procurar(
+        args.comando,
+        args.tamanho,
+        args.processar,
+        args.excluir,
+        args.fixar,
+        args.contem,
+        args.mostrar_pesos,
+        args.ordenar_tf,
+    )
