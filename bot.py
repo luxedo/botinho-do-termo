@@ -3,42 +3,16 @@
 Oi eu sou o botinho do termo 🐬
 """
 import asyncio
+from datetime import datetime
+import random
 import time
-from subprocess import run
 from pyppeteer import launch
 import pyperclip
 
-TENTATIVA_INICIAL = "teias"
-TAMANHO = len(TENTATIVA_INICIAL)
+from termo import procurar
 
-
-def procurar_palavras(comando, solucao):
-    cmd = ["python", "termo.py", comando, "-m"]
-    if comando == "listar":
-        cmd += ["-o"]
-    if len(solucao["excluir"]) > 0:
-        cmd += ["--excluir"] + list(set(solucao["excluir"]))
-    if len(solucao["fixar"]) > 0:
-        cmd += ["--fixar"] + list(set(solucao["fixar"]))
-    if len(solucao["contem"]) > 0:
-        fixas = set([f[1] for f in solucao["fixar"]])
-        contem = list(set([c for c in solucao["contem"] if c[1] not in fixas]))
-        if len(contem) > 0:
-            cmd += ["--contem"] + contem
-    print(" ".join(cmd))
-    proc = run(cmd, capture_output=True)
-    if proc.returncode == 0:
-        return list(
-            map(
-                lambda row: (row[0], float(row[1]), float(row[2])),
-                [
-                    p.split(" - ")
-                    for p in proc.stdout.decode("utf-8").strip().split("\n")
-                ],
-            )
-        )
-    else:
-        return None
+TAMANHO = 5
+PALAVRAS_INICIAIS = 50
 
 
 async def main():
@@ -51,19 +25,27 @@ async def main():
     fechar = await page.querySelector("#helpclose")
     await fechar.click()
 
-    solucao = {
-        "excluir": [],
-        "fixar": [],
+    now = datetime.now()
+    seed = int(f"9{now.day:02}{now.month:02}{now.year:04}")
+    print(f"Semete randomica: {seed}")
+    random.seed(seed)  # Make it reproductible *wink*
+
+    kwargs = {
+        "excluir": set(),
+        "fixar": {},
         "contem": [],
+        "tamanho": TAMANHO,
+        "processar": False,
     }
-    tentativa = TENTATIVA_INICIAL
+    palavras = procurar(comando="eliminar", **kwargs)
+    tentativa = random.choice(palavras[:PALAVRAS_INICIAIS])[0]
     print("tentativa:", tentativa)
     for linha in range(1, 7):
         await page.keyboard.type(f"{tentativa}\n")
         time.sleep(TAMANHO)
-        corretas = 0
-        respostas = []
+        respostas = set()
         for coluna in range(1, 6):
+            letra = tentativa[coluna - 1]
             cell = await page.querySelector(
                 f"#board div:nth-child({linha}) div:nth-child({coluna})"
             )
@@ -76,47 +58,64 @@ async def main():
                 (await cell.getProperty("className"))
                 .toString()
                 .removeprefix("JSHandle:")
+                .removeprefix("letter ")
+                .removesuffix(" done")
             )
-            if "wrong" in cell_class:
-                if tentativa.count(tentativa[coluna - 1]) == 1:
-                    solucao["excluir"].append(f"{tentativa[coluna-1]}")
-                else:
-                    pass
-            elif "place" in cell_class:
-                solucao["contem"].append(f"{coluna}{tentativa[coluna-1]}")
-            elif "right" in cell_class:
-                solucao["fixar"].append(f"{coluna}{tentativa[coluna-1]}")
-                corretas += 1
-            else:
-                print("no!", cell_value, cell_class)
-            print(cell_class.removeprefix("letter "), tentativa[coluna - 1])
+            respostas.add((coluna, letra, cell_class))
+            print(cell_class, tentativa[coluna - 1])
 
-        if corretas == TAMANHO:
+        todas_corretas = all(c == "right" for _, _, c in list(respostas))
+        if todas_corretas:
             print("Achou!")
             break
+
+        duplicadas = [l for l in tentativa if tentativa.count(l) > 1]
+        for (coluna, letra, cell_class) in list(respostas):
+            if cell_class == "wrong":
+                if letra in duplicadas:
+                    conflitos = [c for c in list(respostas) if c[1] == letra]
+                    if not all(c[2] == "wrong" for c in conflitos):
+                        continue
+                kwargs["excluir"].add(tentativa[coluna - 1])
+            elif cell_class == "place":
+                kwargs["contem"].append([coluna, tentativa[coluna - 1]])
+            elif cell_class == "right":
+                kwargs["fixar"][coluna] = tentativa[coluna - 1]
+            else:
+                print("no!", cell_value, cell_class)
+
         print("Procurando palavras...")
-        achados = procurar_palavras("listar", solucao)
-        if achados is None:
-            print(f"Oh no! Erro no comando")
-            break
-        elif len(achados) == 0:
+        print("listar", kwargs)
+        achados = procurar(comando="listar", **kwargs)
+        if len(achados) == 0:
             print("Oh no! sem mais adivinhos")
             break
 
-        print(f"Encontrou {len(achados)} palavras. Mais provaveis: {achados[:5]}")
-        if len(achados) < 5 or achados[0][1] > 0.8 or linha == 6:
+        achados = sorted(achados, key=lambda x: (x[1], x[0]), reverse=True)
+        mais_provaveis = "\n".join(
+            [f"{a[0]} - {a[1]:03f} - {a[2]:.3f}" for a in achados[:5]]
+        )
+        print(f"Encontrou {len(achados)} palavras. Mais provaveis:\n{mais_provaveis}")
+        if len(achados) < 3 or achados[0][1] > 0.8 or linha == 6:
             tentativa = achados[0][0]
         else:
-            palavras_eliminar = procurar_palavras("eliminar", solucao)
-            print(
-                f"Encontrou {len(palavras_eliminar)} palavras ótimas. Melhores opções: {palavras_eliminar[:5]}"
-            )
-            tentativa = palavras_eliminar[0][0]
+            print("eliminar", kwargs)
+            palavras_eliminar = procurar(comando="eliminar", **kwargs)
+            if len(palavras_eliminar) >= 1:
+                mais_provaveis = "\n".join(
+                    [f"{a[0]} - {a[1]:03f} - {a[2]:.3f}" for a in palavras_eliminar[:5]]
+                )
+                print(
+                    f"Encontrou {len(achados)} palavras. Mais provaveis:\n{mais_provaveis}"
+                )
+                tentativa = palavras_eliminar[0][0]
+            else:
+                tentativa = achados[0][0]
 
         print()
         print("tentativa:", tentativa)
 
-    if corretas != TAMANHO:
+    if not todas_corretas:
         palavra = (
             (await (await page.querySelector("#msg")).getProperty("innerHTML"))
             .toString()

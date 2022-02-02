@@ -109,6 +109,7 @@ def filtrar_wordlist(
     possibilidades = [
         p for p in possibilidades if all(f == p[i - 1] for i, f in fixar.items())
     ]
+    possibilidades = [p for p in possibilidades if all(c in p for i, c in contem)]
     possibilidades = [
         p for p in possibilidades if all(c != p[i - 1] for i, c in contem)
     ]
@@ -125,7 +126,7 @@ def filtrar_wordlist(
         ord_freq = dict(Counter("".join(palavras)))
     achados = map(lambda p: calcular_peso(p, ord_freq, tf), palavras)
     achados = log_softmax_coluna(achados, 1)
-    return sorted(achados, key=lambda row: -row[2])
+    return sorted(achados, key=lambda row: (row[2], row[0]), reverse=True)
 
 
 def tupla_numero_letra(strings):
@@ -146,7 +147,7 @@ def mostrar_palavras(achados, mostrar_pesos, ordenar_tf):
                 for p in (
                     achados
                     if not ordenar_tf
-                    else sorted(achados, key=lambda row: -row[1])
+                    else sorted(achados, key=lambda row: (row[1], row[0]), reverse=True)
                 )
             ]
         )
@@ -160,21 +161,19 @@ def procurar(
     excluir,
     fixar,
     contem,
-    mostrar_pesos=False,
-    ordenar_tf=False,
 ):
     wordlist = carregar_wordlist(tamanho, processar)
     tf = carregar_tf(tamanho, processar)
-    achados = filtrar_wordlist(wordlist, tf, tamanho, excluir, dict(fixar), contem, [])
+    achados = filtrar_wordlist(wordlist, tf, tamanho, excluir, fixar, contem)
 
-    if comando[0] == "listar":
-        mostrar_palavras(achados, mostrar_pesos, ordenar_tf)
+    if comando == "listar":
+        return achados
 
-    elif comando[0] == "eliminar":
+    elif comando == "eliminar":
         # 1. Tenta gerar palavras com todas as letras restantes
         ord_freq = dict(Counter("".join([p[0] for p in achados])))
         letras_usadas = list(
-            set(list(excluir) + [f[1] for f in fixar] + [c[1] for c in contem])
+            set(list(excluir) + [f for f in fixar.values()] + [c[1] for c in contem])
         )
         achados = filtrar_wordlist(
             wordlist,
@@ -183,35 +182,43 @@ def procurar(
             excluir=letras_usadas,
             fixar={},
             contem={},
-            talvez_contenha=[],
+            talvez_contenha=list(ord_freq),
+            ord_freq=ord_freq,
         )
-        if len(achados) != 0:
-            mostrar_palavras(achados, mostrar_pesos, ordenar_tf)
-            return
+        if len(achados) > 0:
+            return achados
 
         # 2. Remove letras da lista de exclusões por ordem de frequencia reversa
+        achados = set()
         for c in reversed(ord_freq):
             if c in letras_usadas:
                 letras_usadas_vogal = letras_usadas[:]
                 letras_usadas_vogal.remove(c)
-                achados = filtrar_wordlist(
-                    wordlist,
-                    tf,
-                    tamanho,
-                    excluir=letras_usadas_vogal,
-                    fixar={},
-                    contem={},
-                    talvez_contenha=list(ord_freq),
+                achados |= set(
+                    filtrar_wordlist(
+                        wordlist,
+                        tf,
+                        tamanho,
+                        excluir=letras_usadas_vogal,
+                        fixar={},
+                        contem={},
+                        talvez_contenha=list(ord_freq),
+                        ord_freq=ord_freq,
+                    )
                 )
-                if len(achados) != 0:
-                    mostrar_palavras(achados, mostrar_pesos, ordenar_tf)
-                    return
+        # Ignora palavras com 4 ou mais letras repetidas
+        achados = [a for a in achados if len(set(a[0])) >= 4]
+        achados = sorted(achados, key=lambda x: (x[2], x[0]), reverse=True)
+        if len(achados) > 0:
+            return achados
 
-        # 3. Ainda não pensei
+        # # 3. Ainda não pensei
 
     else:
         raise Exception("Algo está mto errado!")
         pass  # Num vai chegar aqui não
+
+    return []
 
 
 if __name__ == "__main__":
@@ -261,13 +268,12 @@ if __name__ == "__main__":
         help="Mostra os pesos calculados para cada palavra",
     )
     args = parser.parse_args()
-    procurar(
-        args.comando,
+    achados = procurar(
+        args.comando[0],
         args.tamanho,
         args.processar,
         args.excluir,
-        args.fixar,
+        dict(args.fixar),
         args.contem,
-        args.mostrar_pesos,
-        args.ordenar_tf,
     )
+    mostrar_palavras(achados, args.mostrar_pesos, args.ordenar_tf)
