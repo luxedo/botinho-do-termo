@@ -12,7 +12,7 @@ from collections import Counter
 import math
 import os
 from os import path
-import sys
+from sys import stderr
 from unidecode import unidecode
 
 LISTS_DIR = "dicionarios/"
@@ -27,8 +27,8 @@ def carregar_wordlist(tamanho, forcar):
     if not path.isdir(LISTS_DIR):
         os.makedirs(LISTS_DIR)
     if not path.isfile(WORDLIST.format(n=tamanho)) or forcar:
-        print("Pré processando palavras... aguarde puvafô", file=sys.stderr)
-        print("Isso é feito apenas uma vez", file=sys.stderr)
+        print("Pré processando palavras... aguarde puvafô", file=stderr)
+        print("Isso é feito apenas uma vez", file=stderr)
         with open(WORDLIST.format(n=tamanho), "w") as fw:
             with open(WORDREPO, "r") as fr:
                 fw.write(
@@ -40,7 +40,7 @@ def carregar_wordlist(tamanho, forcar):
                         ]
                     )
                 )
-        print("Feito!", file=sys.stderr)
+        print("Feito!", file=stderr)
     with open(WORDLIST.format(n=tamanho), "r") as fp:
         return fp.read().strip().split("\n")
 
@@ -51,9 +51,9 @@ def carregar_tf(tamanho, forcar):
     if not path.isfile(TFLIST.format(n=tamanho)) or forcar:
         print(
             "Pré processando frequencias das palavras... aguarde puvafô",
-            file=sys.stderr,
+            file=stderr,
         )
-        print("Isso é feito apenas uma vez", file=sys.stderr)
+        print("Isso é feito apenas uma vez", file=stderr)
         with open(TFLIST.format(n=tamanho), "w") as fw:
             with open(TFREPO, "r") as fr:
                 palavras = [l.split(",") for l in fr.read().split("\n")]
@@ -63,7 +63,7 @@ def carregar_tf(tamanho, forcar):
                     if len(p[0]) == tamanho
                 ]
                 fw.write("\n".join(palavras))
-        print("Feito!", file=sys.stderr)
+        print("Feito!", file=stderr)
     with open(TFLIST.format(n=tamanho), "r") as fp:
         return dict(
             map(
@@ -170,49 +170,30 @@ def procurar(
         return achados
 
     elif comando == "eliminar":
-        # 1. Tenta gerar palavras com todas as letras restantes
-        ord_freq = dict(Counter("".join([p[0] for p in achados])))
-        letras_usadas = list(
-            set(list(excluir) + [f for f in fixar.values()] + [c[1] for c in contem])
+        repete_em_todas = set(ascii_lowercase).intersection(
+            *[set(a[0]) for a in achados]
         )
+        ord_freq = {
+            key: value
+            for key, value in dict(
+                Counter("".join(["".join(set(a[0])) for a in achados]))
+            ).items()
+            if key not in repete_em_todas
+        }
+        print(ord_freq)
         achados = filtrar_wordlist(
             wordlist,
             tf,
             tamanho,
-            excluir=letras_usadas,
+            excluir=[],
             fixar={},
             contem={},
             talvez_contenha=list(ord_freq),
             ord_freq=ord_freq,
         )
-        if len(achados) > 0:
-            return achados
-
-        # 2. Remove letras da lista de exclusões por ordem de frequencia reversa
-        achados = set()
-        for c in reversed(ord_freq):
-            if c in letras_usadas:
-                letras_usadas_vogal = letras_usadas[:]
-                letras_usadas_vogal.remove(c)
-                achados |= set(
-                    filtrar_wordlist(
-                        wordlist,
-                        tf,
-                        tamanho,
-                        excluir=letras_usadas_vogal,
-                        fixar={},
-                        contem={},
-                        talvez_contenha=list(ord_freq),
-                        ord_freq=ord_freq,
-                    )
-                )
-        # Ignora palavras com 4 ou mais letras repetidas
-        achados = [a for a in achados if len(set(a[0])) >= 4]
-        achados = sorted(achados, key=lambda x: (x[2], x[0]), reverse=True)
-        if len(achados) > 0:
-            return achados
-
-        # # 3. Ainda não pensei
+        return achados
+        # achados = [a for a in achados if len(set(a[0])) >= 4]
+        # achados = sorted(achados, key=lambda x: (x[2], x[0]), reverse=True)
 
     else:
         raise Exception("Algo está mto errado!")

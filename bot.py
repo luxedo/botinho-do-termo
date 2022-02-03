@@ -17,18 +17,18 @@ PALAVRAS_INICIAIS = 50
 
 async def main():
     print("Iniciando botinho")
+    now = datetime.now()
+    seed = int(f"9{now.day:02}{now.month:02}{now.year:04}")
+    print(f"Semete randomica: {seed}")
+    random.seed(seed)  # Make it reproductible *wink*
     print()
+
     browser = await launch({"headless": False})
     # browser = await launch()
     page = await browser.newPage()
     await page.goto("https://term.ooo")
     fechar = await page.querySelector("#helpclose")
     await fechar.click()
-
-    now = datetime.now()
-    seed = int(f"9{now.day:02}{now.month:02}{now.year:04}")
-    print(f"Semete randomica: {seed}")
-    random.seed(seed)  # Make it reproductible *wink*
 
     kwargs = {
         "excluir": set(),
@@ -96,7 +96,7 @@ async def main():
             [f"{a[0]} - {a[1]:03f} - {a[2]:.3f}" for a in achados[:5]]
         )
         print(f"Encontrou {len(achados)} palavras. Mais provaveis:\n{mais_provaveis}")
-        if len(achados) < 3 or achados[0][1] > 0.8 or linha == 6:
+        if (len(achados) < 5 and achados[0][1] > 0.8) or linha == 6:
             tentativa = achados[0][0]
         else:
             print("eliminar", kwargs)
@@ -106,7 +106,7 @@ async def main():
                     [f"{a[0]} - {a[1]:03f} - {a[2]:.3f}" for a in palavras_eliminar[:5]]
                 )
                 print(
-                    f"Encontrou {len(achados)} palavras. Mais provaveis:\n{mais_provaveis}"
+                    f"Encontrou {len(palavras_eliminar)} palavras. Ótimas:\n{mais_provaveis}"
                 )
                 tentativa = palavras_eliminar[0][0]
             else:
