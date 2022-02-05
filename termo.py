@@ -21,7 +21,6 @@ WORDLIST = LISTS_DIR + "wordlist_{n}.txt"
 TFLIST = LISTS_DIR + "tf_{n}.csv"
 WORDREPO = "pt-br/palavras"
 TFREPO = "pt-br/tf"
-FREQUENCIAS = "eitsanhurdmwgvlfbkopjxczyq"
 PALAVRAS_INICIAIS = 50
 
 
@@ -75,17 +74,14 @@ def carregar_tf(tamanho, processar):
         )
 
 
-def calcular_peso(palavra, ord_freq, tf):
+def calcular_peso(palavra, ord_freq, tf, lf):
     letras = set(palavra)
     return (
         palavra,
         tf.get(palavra),
         sum(
             [
-                (
-                    ord_freq.get(l, 0)
-                    + FREQUENCIAS[::-1].index(l) / len(FREQUENCIAS) / len(letras)
-                )
+                (ord_freq.get(l, 0) + lf[::-1].index(l) / len(lf) / len(letras))
                 for l in letras
             ]
         ),
@@ -105,7 +101,15 @@ def log_softmax_coluna(achados, coluna):
 
 
 def filtrar_wordlist(
-    wordlist, tf, tamanho, excluir, fixar, contem, talvez_contenha=None, ord_freq=None
+    wordlist,
+    tf,
+    lf,
+    tamanho,
+    excluir,
+    fixar,
+    contem,
+    talvez_contenha=None,
+    ord_freq=None,
 ):
     possibilidades = [p for p in wordlist if not any(l in p for l in excluir)]
     possibilidades = [
@@ -121,7 +125,7 @@ def filtrar_wordlist(
     tamanho = len(possibilidades[0])
     if ord_freq is None:
         ord_freq = dict(Counter("".join(possibilidades)))
-    achados = map(lambda p: calcular_peso(p, ord_freq, tf), possibilidades)
+    achados = map(lambda p: calcular_peso(p, ord_freq, tf, lf), possibilidades)
     achados = log_softmax_coluna(achados, 1)
     return sorted(achados, key=lambda row: (row[2], row[0]), reverse=True)
 
@@ -151,7 +155,15 @@ def procurar(
 ):
     wordlist = carregar_wordlist(tamanho, processar)
     tf = carregar_tf(tamanho, processar)
-    achados = filtrar_wordlist(wordlist, tf, tamanho, excluir, fixar, contem)
+    lf = "".join(
+        [
+            f[0]
+            for f in sorted(
+                Counter("".join(wordlist)).most_common(), key=lambda x: -x[1]
+            )
+        ]
+    )
+    achados = filtrar_wordlist(wordlist, tf, lf, tamanho, excluir, fixar, contem)
 
     if comando == "listar":
         return achados
@@ -170,6 +182,7 @@ def procurar(
         achados = filtrar_wordlist(
             wordlist,
             tf,
+            lf,
             tamanho,
             excluir=[],
             fixar={},
@@ -297,23 +310,27 @@ def tupla_numero_letra(strings):
 
 
 if __name__ == "__main__":
-    tentativas = ["teias", "lucro"]
-    resultados = ["rpwpw", "wwwww"]
-    print(resolver(tentativas, resultados, verboso=True))
-    sys.exit()
-
     parser = argparse.ArgumentParser(description="Pra jogar termo")
-    parser.add_argument(
-        "comando",
+    subparsers = parser.add_subparsers(dest="comando")
+
+    parser_resolver = subparsers.add_parser("resolver")
+    parser_resolver.add_argument("-t", "--tentativas", nargs="*")
+    parser_resolver.add_argument("-r", "--resultados", nargs="*")
+    parser_resolver.add_argument("-v", "--verboso", action="store_true")
+
+    parser_procurar = subparsers.add_parser("procurar")
+    parser_procurar.add_argument(
+        "comando_procurar",
         choices=["listar", "eliminar"],
         nargs=1,
         help="Lista palavras ou determina a palavra que maximiza a eliminação de letras.",
     )
-    parser.add_argument("-t", "--tamanho", type=int, default=5)
-    parser.add_argument(
+
+    parser_procurar.add_argument("-t", "--tamanho", type=int, default=5)
+    parser_procurar.add_argument(
         "-x", "--excluir", nargs="+", default=list(), help="Letras que não tem"
     )
-    parser.add_argument(
+    parser_procurar.add_argument(
         "-f",
         "--fixar",
         nargs="+",
@@ -321,7 +338,7 @@ if __name__ == "__main__":
         help="Caracteres fixos (2o 3l)",
         default={},
     )
-    parser.add_argument(
+    parser_procurar.add_argument(
         "-c",
         "--contem",
         nargs="+",
@@ -329,31 +346,38 @@ if __name__ == "__main__":
         default=list(),
         help="Letras que tem (2o 3l)",
     )
-    parser.add_argument(
+    parser_procurar.add_argument(
         "-p",
         "--processar",
         action="store_true",
         help="Realiza o processamento do dicionário",
     )
-    parser.add_argument(
+    parser_procurar.add_argument(
         "-o",
         "--ordenar-tf",
         action="store_true",
         help="Ordena pela frequencia das palavras",
     )
-    parser.add_argument(
+    parser_procurar.add_argument(
         "-m",
         "--mostrar-pesos",
         action="store_true",
         help="Mostra os pesos calculados para cada palavra",
     )
     args = parser.parse_args()
-    achados = procurar(
-        args.comando[0],
-        args.tamanho,
-        args.processar,
-        args.excluir,
-        dict(args.fixar),
-        args.contem,
-    )
-    mostrar_palavras(achados, args.mostrar_pesos, args.ordenar_tf)
+    if args.comando in "procurar":
+        achados = procurar(
+            args.comando_procurar[0],
+            args.tamanho,
+            args.processar,
+            args.excluir,
+            dict(args.fixar),
+            args.contem,
+        )
+        mostrar_palavras(achados, args.mostrar_pesos, args.ordenar_tf)
+    elif args.comando == "resolver":
+        if len(args.tentativas) != len(args.resultados):
+            raise ValueError("tentativas e resultados precisam ter o mesmo comprimento")
+        tentativa = resolver(args.tentativas, args.resultados, args.verboso)
+        print()
+        print(f"Melhor opção: {tentativa}")
