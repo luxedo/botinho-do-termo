@@ -12,6 +12,7 @@ from collections import Counter
 import math
 import os
 from os import path
+import random
 from sys import stderr
 from unidecode import unidecode
 
@@ -21,12 +22,13 @@ TFLIST = LISTS_DIR + "tf_{n}.csv"
 WORDREPO = "pt-br/palavras"
 TFREPO = "pt-br/tf"
 FREQUENCIAS = "eitsanhurdmwgvlfbkopjxczyq"
+PALAVRAS_INICIAIS = 50
 
 
-def carregar_wordlist(tamanho, forcar):
+def carregar_wordlist(tamanho, processar):
     if not path.isdir(LISTS_DIR):
         os.makedirs(LISTS_DIR)
-    if not path.isfile(WORDLIST.format(n=tamanho)) or forcar:
+    if not path.isfile(WORDLIST.format(n=tamanho)) or processar:
         print("Pré processando palavras... aguarde puvafô", file=stderr)
         print("Isso é feito apenas uma vez", file=stderr)
         with open(WORDLIST.format(n=tamanho), "w") as fw:
@@ -45,10 +47,10 @@ def carregar_wordlist(tamanho, forcar):
         return fp.read().strip().split("\n")
 
 
-def carregar_tf(tamanho, forcar):
+def carregar_tf(tamanho, processar):
     if not path.isdir(LISTS_DIR):
         os.makedirs(LISTS_DIR)
-    if not path.isfile(TFLIST.format(n=tamanho)) or forcar:
+    if not path.isfile(TFLIST.format(n=tamanho)) or processar:
         print(
             "Pré processando frequencias das palavras... aguarde puvafô",
             file=stderr,
@@ -107,12 +109,10 @@ def filtrar_wordlist(
 ):
     possibilidades = [p for p in wordlist if not any(l in p for l in excluir)]
     possibilidades = [
-        p for p in possibilidades if all(f == p[i - 1] for i, f in fixar.items())
+        p for p in possibilidades if all(f == p[i] for i, f in fixar.items())
     ]
     possibilidades = [p for p in possibilidades if all(c in p for i, c in contem)]
-    possibilidades = [
-        p for p in possibilidades if all(c != p[i - 1] for i, c in contem)
-    ]
+    possibilidades = [p for p in possibilidades if all(c != p[i] for i, c in contem)]
     if talvez_contenha:
         achados = [p for p in possibilidades if any([t in p for t in talvez_contenha])]
 
@@ -124,16 +124,6 @@ def filtrar_wordlist(
     achados = map(lambda p: calcular_peso(p, ord_freq, tf), possibilidades)
     achados = log_softmax_coluna(achados, 1)
     return sorted(achados, key=lambda row: (row[2], row[0]), reverse=True)
-
-
-def tupla_numero_letra(strings):
-    if (
-        len(strings) != 2
-        or strings[0] not in digits
-        or strings[1] not in ascii_lowercase
-    ):
-        raise ValueError("Use a posição e a letra. Ex: (2o 3l)")
-    return [int(strings[0]), strings[1]]
 
 
 def mostrar_palavras(achados, mostrar_pesos, ordenar_tf):
@@ -177,7 +167,6 @@ def procurar(
             ).items()
             if key not in repete_em_todas
         }
-        print(ord_freq)
         achados = filtrar_wordlist(
             wordlist,
             tf,
@@ -189,8 +178,6 @@ def procurar(
             ord_freq=ord_freq,
         )
         return achados
-        # achados = [a for a in achados if len(set(a[0])) >= 4]
-        # achados = sorted(achados, key=lambda x: (x[2], x[0]), reverse=True)
 
     else:
         raise Exception("Algo está mto errado!")
@@ -199,7 +186,122 @@ def procurar(
     return []
 
 
+def chute_inicial():
+    palavras = procurar(
+        comando="eliminar", tamanho=5, processar=False, excluir=[], fixar={}, contem=[]
+    )
+    return random.choice(palavras[:PALAVRAS_INICIAIS])[0]
+
+
+def gerar_argumentos(tentativas, resultados):
+    if len(tentativas) == 0:
+        return [], {}, []
+    tamanho = len(tentativas[0])
+    excluir = set()
+    fixar = {}
+    contem = set()
+    for palavra, resultado in zip(tentativas, resultados):
+        duplicadas = [l for l in palavra if palavra.count(l) > 1]
+        for i, (letra, res) in enumerate(zip(palavra, resultado)):
+            if res == "w":
+                if letra in duplicadas:
+                    conflitos = [
+                        resultado[i] for i in range(tamanho) if letra == palavra[i]
+                    ]
+                    if set(conflitos) != set("w"):
+                        continue
+                excluir.add(letra)
+            elif res == "p":
+                contem.add((i, letra))
+            elif res == "r":
+                fixar[i] = letra
+            else:
+                raise ValueError("Resultado so pode ter 'r', 'w', ou 'p'")
+    return excluir, fixar, contem
+
+
+def resolver(tentativas, resultados, verboso=False):
+    """
+    Gera uma palavra para tentar resolver o term.ooo
+
+    Args:
+        tentativas (lista): lista de palavras
+        resultados (lista): lista dos resultados de cada letra
+            ('r' - right, 'w' - wrong, 'p' - place)
+    """
+    if verboso:
+        print(f"resolver({tentativas}, {resultados}, verboso={verboso})")
+
+    if len(tentativas) == 0:
+        return chute_inicial()
+    excluir, fixar, contem = gerar_argumentos(tentativas, resultados)
+
+    if verboso:
+        print(f"excluir: {excluir}")
+        print(f"fixar: {fixar}")
+        print(f"contem: {contem}")
+
+    tamanho = len(tentativas[0])
+    linhas = len(tentativas)
+    processar = not path.isfile(WORDLIST.format(n=tamanho))
+    kwargs = {
+        "tamanho": tamanho,
+        "processar": processar,
+        "excluir": excluir,
+        "fixar": fixar,
+        "contem": contem,
+    }
+    achados = procurar("listar", **kwargs)
+    if len(achados) == 0:
+        return None
+
+    achados = sorted(achados, key=lambda x: (x[1], x[0]), reverse=True)
+    if verboso:
+        mais_provaveis = "\n".join(
+            [f"{a[0]} - {a[1]:03f} - {a[2]:.3f}" for a in achados[:5]]
+        )
+        print(f"Encontrou {len(achados)} palavras. Mais provaveis:\n{mais_provaveis}")
+
+    encontradas = set(c[1] for c in contem)
+    if (
+        (len(achados) < 5 and achados[0][1] > 0.8)
+        or linhas == 5
+        or (len(fixar) <= 2 and len(encontradas) >= 3)
+    ):
+        return achados[0][0]
+    else:
+        palavras_eliminar = procurar("eliminar", **kwargs)
+        if verboso:
+            mais_provaveis = "\n".join(
+                [f"{a[0]} - {a[1]:03f} - {a[2]:.3f}" for a in palavras_eliminar[:5]]
+            )
+            print(
+                f"Encontrou {len(palavras_eliminar)} palavras. Mais provaveis:\n{mais_provaveis}"
+            )
+        if len(palavras_eliminar) >= 1:
+            return palavras_eliminar[0][0]
+        else:
+            return achados[0][0]
+
+    return None  # Não deve chegar aqui hein
+
+
+def tupla_numero_letra(strings):
+    if (
+        len(strings) != 2
+        or strings[0] not in digits
+        or strings[1] not in ascii_lowercase
+    ):
+        raise ValueError("Use a posição e a letra. Ex: (2o 3l)")
+    return int(strings[0]) - 1, strings[1]  # Indexando a partir de 1 pq sim
+
+
 if __name__ == "__main__":
+    tentativas = ["teias", "lucro"]
+    resultados = ["rpwpw", "wwwww"]
+    print(resolver(tentativas, resultados, verboso=True))
+    sys.exit()
+
     parser = argparse.ArgumentParser(description="Pra jogar termo")
     parser.add_argument(
         "comando",

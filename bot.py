@@ -9,10 +9,9 @@ import time
 from pyppeteer import launch
 import pyperclip
 
-from termo import procurar
+from termo import procurar, resolver
 
 TAMANHO = 5
-PALAVRAS_INICIAIS = 50
 
 
 async def main():
@@ -30,30 +29,17 @@ async def main():
     fechar = await page.querySelector("#helpclose")
     await fechar.click()
 
-    kwargs = {
-        "excluir": set(),
-        "fixar": {},
-        "contem": [],
-        "tamanho": TAMANHO,
-        "processar": False,
-    }
-    letras = set()
-    palavras = procurar(comando="eliminar", **kwargs)
-    tentativa = random.choice(palavras[:PALAVRAS_INICIAIS])[0]
+    tentativas = []
+    resultados = []
+    tentativa = resolver([], [])
     print("tentativa:", tentativa)
     for linha in range(1, 7):
+        resultado = ""
         await page.keyboard.type(f"{tentativa}\n")
         time.sleep(TAMANHO)
-        respostas = set()
         for coluna in range(1, 6):
-            letra = tentativa[coluna - 1]
             cell = await page.querySelector(
                 f"#board div:nth-child({linha}) div:nth-child({coluna})"
-            )
-            cell_value = (
-                (await cell.getProperty("innerHTML"))
-                .toString()
-                .removeprefix("JSHandle:")
             )
             cell_class = (
                 (await cell.getProperty("className"))
@@ -62,65 +48,21 @@ async def main():
                 .removeprefix("letter ")
                 .removesuffix(" done")
             )
-            respostas.add((coluna, letra, cell_class))
+            resultado += cell_class[0]
             print(cell_class, tentativa[coluna - 1])
 
-        todas_corretas = all(c == "right" for _, _, c in list(respostas))
+        tentativas.append(tentativa)
+        resultados.append(resultado)
+        todas_corretas = set(resultado) == set("r")
         if todas_corretas:
             print("Achou!")
             break
 
-        duplicadas = [l for l in tentativa if tentativa.count(l) > 1]
-        for (coluna, letra, cell_class) in list(respostas):
-            if cell_class == "wrong":
-                if letra in duplicadas:
-                    conflitos = [c for c in list(respostas) if c[1] == letra]
-                    if not all(c[2] == "wrong" for c in conflitos):
-                        continue
-                kwargs["excluir"].add(tentativa[coluna - 1])
-            elif cell_class == "place":
-                kwargs["contem"].append([coluna, tentativa[coluna - 1]])
-                letras.add(tentativa[coluna - 1])
-            elif cell_class == "right":
-                kwargs["fixar"][coluna] = tentativa[coluna - 1]
-                letras.add(tentativa[coluna - 1])
-            else:
-                print("no!", cell_value, cell_class)
-
         print("Procurando palavras...")
-        print("listar", kwargs)
-        achados = procurar(comando="listar", **kwargs)
-        if len(achados) == 0:
-            print("Oh no! sem mais adivinhos")
+        tentativa = resolver(tentativas, resultados, verboso=True)
+        if tentativa is None:
+            print("Oh no! sem mais achados!")
             break
-
-        achados = sorted(achados, key=lambda x: (x[1], x[0]), reverse=True)
-        mais_provaveis = "\n".join(
-            [f"{a[0]} - {a[1]:03f} - {a[2]:.3f}" for a in achados[:5]]
-        )
-        print(f"Encontrou {len(achados)} palavras. Mais provaveis:\n{mais_provaveis}")
-        if (
-            (len(achados) < 5 and achados[0][1] > 0.8)
-            or linha == 6
-            or (len(kwargs["fixar"]) == 0 and len(letras) > 3)
-        ):
-            tentativa = achados[0][0]
-        else:
-            print("eliminar", kwargs)
-            palavras_eliminar = procurar(comando="eliminar", **kwargs)
-            if len(palavras_eliminar) >= 1:
-                mais_provaveis = "\n".join(
-                    [f"{a[0]} - {a[1]:03f} - {a[2]:.3f}" for a in palavras_eliminar[:5]]
-                )
-                print(
-                    f"Encontrou {len(palavras_eliminar)} palavras. Ótimas:\n{mais_provaveis}"
-                )
-                tentativa = palavras_eliminar[0][0]
-            else:
-                tentativa = achados[0][0]
-
-        print()
-        print("tentativa:", tentativa)
 
     if not todas_corretas:
         palavra = (
