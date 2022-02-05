@@ -24,54 +24,94 @@ TFREPO = "pt-br/tf"
 PALAVRAS_INICIAIS = 50
 
 
+cache_wordlist = None
+cache_tf = None
+cache_lf = None
+
+
 def carregar_wordlist(tamanho, processar):
-    if not path.isdir(LISTS_DIR):
-        os.makedirs(LISTS_DIR)
-    if not path.isfile(WORDLIST.format(n=tamanho)) or processar:
-        print("Pré processando palavras... aguarde puvafô", file=stderr)
-        print("Isso é feito apenas uma vez", file=stderr)
-        with open(WORDLIST.format(n=tamanho), "w") as fw:
-            with open(WORDREPO, "r") as fr:
-                fw.write(
-                    "\n".join(
-                        [
-                            unidecode(l)
-                            for l in fr.read().split("\n")
-                            if len(l) == tamanho
-                        ]
+    global cache_wordlist
+    if cache_wordlist is None:
+        if not path.isdir(LISTS_DIR):
+            os.makedirs(LISTS_DIR)
+        if not path.isfile(WORDLIST.format(n=tamanho)) or processar:
+            print("Pré processando palavras... aguarde puvafô", file=stderr)
+            print("Isso é feito apenas uma vez", file=stderr)
+            with open(WORDLIST.format(n=tamanho), "w") as fw:
+                with open(WORDREPO, "r") as fr:
+                    fw.write(
+                        "\n".join(
+                            [
+                                unidecode(l)
+                                for l in fr.read().split("\n")
+                                if len(l) == tamanho
+                            ]
+                        )
                     )
+            print("Feito!", file=stderr)
+        with open(WORDLIST.format(n=tamanho), "r") as fp:
+            cache_wordlist = fp.read().strip().split("\n")
+            cache_wordlist = list(
+                zip(
+                    cache_wordlist,
+                    list(map(set, cache_wordlist)),
+                    list(
+                        map(
+                            lambda palavra: set((i, l) for i, l in enumerate(palavra)),
+                            cache_wordlist,
+                        )
+                    ),
                 )
-        print("Feito!", file=stderr)
-    with open(WORDLIST.format(n=tamanho), "r") as fp:
-        return fp.read().strip().split("\n")
+            )
+    return cache_wordlist
 
 
 def carregar_tf(tamanho, processar):
-    if not path.isdir(LISTS_DIR):
-        os.makedirs(LISTS_DIR)
-    if not path.isfile(TFLIST.format(n=tamanho)) or processar:
-        print(
-            "Pré processando frequencias das palavras... aguarde puvafô",
-            file=stderr,
-        )
-        print("Isso é feito apenas uma vez", file=stderr)
-        with open(TFLIST.format(n=tamanho), "w") as fw:
-            with open(TFREPO, "r") as fr:
-                palavras = [l.split(",") for l in fr.read().split("\n")]
-                palavras = [
-                    f"{unidecode(p[0])},{p[1]}"
-                    for p in palavras
-                    if len(p[0]) == tamanho
-                ]
-                fw.write("\n".join(palavras))
-        print("Feito!", file=stderr)
-    with open(TFLIST.format(n=tamanho), "r") as fp:
-        return dict(
-            map(
-                lambda p: (p[0], int(p[1])),
-                [t.split(",") for t in fp.read().strip().split("\n")],
+    global cache_tf
+    if cache_tf is None:
+        if not path.isdir(LISTS_DIR):
+            os.makedirs(LISTS_DIR)
+        if not path.isfile(TFLIST.format(n=tamanho)) or processar:
+            print(
+                "Pré processando frequencias das palavras... aguarde puvafô",
+                file=stderr,
             )
-        )
+            print("Isso é feito apenas uma vez", file=stderr)
+            with open(TFLIST.format(n=tamanho), "w") as fw:
+                with open(TFREPO, "r") as fr:
+                    palavras = [l.split(",") for l in fr.read().split("\n")]
+                    palavras = [
+                        f"{unidecode(p[0])},{p[1]}"
+                        for p in palavras
+                        if len(p[0]) == tamanho
+                    ]
+                    fw.write("\n".join(palavras))
+            print("Feito!", file=stderr)
+        with open(TFLIST.format(n=tamanho), "r") as fp:
+            cache_tf = dict(
+                map(
+                    lambda p: (p[0], int(p[1])),
+                    [t.split(",") for t in fp.read().strip().split("\n")],
+                )
+            )
+    return cache_tf
+
+
+def carregar_lf(wordlist):
+    global cache_lf
+    if cache_lf is None:
+        cache_lf = {
+            f[0]: (len(ascii_lowercase) - i)
+            / len(ascii_lowercase)
+            / len(wordlist[0][0])
+            for i, f in enumerate(
+                sorted(
+                    Counter("".join(list(zip(*wordlist))[0])).most_common(),
+                    key=lambda x: -x[1],
+                )
+            )
+        }
+    return cache_lf
 
 
 def calcular_peso(palavra, ord_freq, tf, lf):
@@ -79,16 +119,14 @@ def calcular_peso(palavra, ord_freq, tf, lf):
     return (
         palavra,
         tf.get(palavra),
-        sum(
-            [
-                (ord_freq.get(l, 0) + lf[::-1].index(l) / len(lf) / len(letras))
-                for l in letras
-            ]
-        ),
+        # sum([(ord_freq.get(l, 0) + lf.get(l, 0)) for l in letras]),
+        sum([ord_freq.get(l, 0) for l in letras]),
     )
 
 
 def log_softmax(dados):
+    # d = np.array(dados)
+    # return np.exp(np.log(d + 1)) / d.sum()
     xp = [math.exp(math.log(x + 1)) for x in dados]
     soma = sum(xp)
     return [x / soma for x in xp]
@@ -111,10 +149,16 @@ def filtrar_wordlist(
     talvez_contenha=None,
     ord_freq=None,
 ):
-    possibilidades = [p for p in wordlist if not any(l in p for l in excluir)]
     possibilidades = [
-        p for p in possibilidades if all(f == p[i] for i, f in fixar.items())
+        # p for p, sw, sp in wordlist if (not sw & excluir) and (not sp - contem)
+        p
+        for p, sw, sp in wordlist
+        if (not sw & excluir) and ((fixar & sp) == fixar)
     ]
+    # possibilidades = [p for p, sw in possibilidades if not s - contem]
+    # possibilidades = [
+    #     p for p in possibilidades if all(f == p[i] for i, f in fixar.items())
+    # ]
     possibilidades = [p for p in possibilidades if all(c in p for i, c in contem)]
     possibilidades = [p for p in possibilidades if all(c != p[i] for i, c in contem)]
     if talvez_contenha:
@@ -155,14 +199,8 @@ def procurar(
 ):
     wordlist = carregar_wordlist(tamanho, processar)
     tf = carregar_tf(tamanho, processar)
-    lf = "".join(
-        [
-            f[0]
-            for f in sorted(
-                Counter("".join(wordlist)).most_common(), key=lambda x: -x[1]
-            )
-        ]
-    )
+    lf = carregar_lf(wordlist)
+
     achados = filtrar_wordlist(wordlist, tf, lf, tamanho, excluir, fixar, contem)
 
     if comando == "listar":
@@ -184,9 +222,9 @@ def procurar(
             tf,
             lf,
             tamanho,
-            excluir=[],
-            fixar={},
-            contem={},
+            excluir=set(),
+            fixar=set(),
+            contem=set(),
             talvez_contenha=list(ord_freq),
             ord_freq=ord_freq,
         )
@@ -199,19 +237,29 @@ def procurar(
     return []
 
 
+cache_palavras = None
+
+
 def chute_inicial():
-    palavras = procurar(
-        comando="eliminar", tamanho=5, processar=False, excluir=[], fixar={}, contem=[]
-    )
-    return random.choice(palavras[:PALAVRAS_INICIAIS])[0]
+    global cache_palavras
+    if cache_palavras is None:
+        cache_palavras = procurar(
+            comando="eliminar",
+            tamanho=5,
+            processar=False,
+            excluir=set(),
+            fixar=set(),
+            contem=set(),
+        )
+    return random.choice(cache_palavras[:PALAVRAS_INICIAIS])[0]
 
 
 def gerar_argumentos(tentativas, resultados):
     if len(tentativas) == 0:
-        return [], {}, []
+        return set(), set(), set()
     tamanho = len(tentativas[0])
     excluir = set()
-    fixar = {}
+    fixar = set()
     contem = set()
     for palavra, resultado in zip(tentativas, resultados):
         duplicadas = [l for l in palavra if palavra.count(l) > 1]
@@ -227,10 +275,30 @@ def gerar_argumentos(tentativas, resultados):
             elif res == "p":
                 contem.add((i, letra))
             elif res == "r":
-                fixar[i] = letra
+                fixar.add((i, letra))
             else:
                 raise ValueError("Resultado so pode ter 'r', 'w', ou 'p'")
     return excluir, fixar, contem
+
+
+def testar(palavra, verboso):
+    tentativas = []
+    resultados = []
+    for i in range(1, 7):
+        tentativa = resolver(tentativas, resultados, verboso)
+        resultado = ""
+        for l, t in zip(palavra, tentativa):
+            if l == t:
+                resultado += "r"
+            elif t in palavra:
+                resultado += "p"
+            else:
+                resultado += "w"
+        resultados.append(resultado)
+        tentativas.append(tentativa)
+        if set(resultado) == set("r"):
+            return i
+    return 7
 
 
 def resolver(tentativas, resultados, verboso=False):
@@ -289,7 +357,7 @@ def resolver(tentativas, resultados, verboso=False):
                 [f"{a[0]} - {a[1]:03f} - {a[2]:.3f}" for a in palavras_eliminar[:5]]
             )
             print(
-                f"Encontrou {len(palavras_eliminar)} palavras. Mais provaveis:\n{mais_provaveis}"
+                f"Encontrou {len(palavras_eliminar)} palavras. Otimas:\n{mais_provaveis}"
             )
         if len(palavras_eliminar) >= 1:
             return palavras_eliminar[0][0]
@@ -317,6 +385,10 @@ if __name__ == "__main__":
     parser_resolver.add_argument("-t", "--tentativas", nargs="*")
     parser_resolver.add_argument("-r", "--resultados", nargs="*")
     parser_resolver.add_argument("-v", "--verboso", action="store_true")
+
+    parser_testar = subparsers.add_parser("testar")
+    parser_testar.add_argument("palavra")
+    parser_testar.add_argument("-v", "--verboso", action="store_true")
 
     parser_procurar = subparsers.add_parser("procurar")
     parser_procurar.add_argument(
@@ -370,9 +442,9 @@ if __name__ == "__main__":
             args.comando_procurar[0],
             args.tamanho,
             args.processar,
-            args.excluir,
-            dict(args.fixar),
-            args.contem,
+            set(args.excluir),
+            set(args.fixar),
+            set(args.contem),
         )
         mostrar_palavras(achados, args.mostrar_pesos, args.ordenar_tf)
     elif args.comando == "resolver":
@@ -381,3 +453,10 @@ if __name__ == "__main__":
         tentativa = resolver(args.tentativas, args.resultados, args.verboso)
         print()
         print(f"Melhor opção: {tentativa}")
+
+    elif args.comando == "testar":
+        rodadas = testar(args.palavra, args.verboso)
+        if rodadas == 7:
+            print("Não achou :(")
+        else:
+            print(f"Acertou em {rodadas}")
