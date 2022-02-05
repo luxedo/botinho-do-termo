@@ -119,12 +119,9 @@ def filtrar_wordlist(
     if len(possibilidades) == 0:
         return []
     tamanho = len(possibilidades[0])
-    palavras = set(possibilidades) & set(wordlist)
-    if len(palavras) == 0:
-        return []
     if ord_freq is None:
-        ord_freq = dict(Counter("".join(palavras)))
-    achados = map(lambda p: calcular_peso(p, ord_freq, tf), palavras)
+        ord_freq = dict(Counter("".join(possibilidades)))
+    achados = map(lambda p: calcular_peso(p, ord_freq, tf), possibilidades)
     achados = log_softmax_coluna(achados, 1)
     return sorted(achados, key=lambda row: (row[2], row[0]), reverse=True)
 

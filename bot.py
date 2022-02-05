@@ -37,6 +37,7 @@ async def main():
         "tamanho": TAMANHO,
         "processar": False,
     }
+    letras = set()
     palavras = procurar(comando="eliminar", **kwargs)
     tentativa = random.choice(palavras[:PALAVRAS_INICIAIS])[0]
     print("tentativa:", tentativa)
@@ -79,8 +80,10 @@ async def main():
                 kwargs["excluir"].add(tentativa[coluna - 1])
             elif cell_class == "place":
                 kwargs["contem"].append([coluna, tentativa[coluna - 1]])
+                letras.add(tentativa[coluna - 1])
             elif cell_class == "right":
                 kwargs["fixar"][coluna] = tentativa[coluna - 1]
+                letras.add(tentativa[coluna - 1])
             else:
                 print("no!", cell_value, cell_class)
 
@@ -96,7 +99,11 @@ async def main():
             [f"{a[0]} - {a[1]:03f} - {a[2]:.3f}" for a in achados[:5]]
         )
         print(f"Encontrou {len(achados)} palavras. Mais provaveis:\n{mais_provaveis}")
-        if (len(achados) < 5 and achados[0][1] > 0.8) or linha == 6:
+        if (
+            (len(achados) < 5 and achados[0][1] > 0.8)
+            or linha == 6
+            or (len(kwargs["fixar"]) == 0 and len(letras) > 3)
+        ):
             tentativa = achados[0][0]
         else:
             print("eliminar", kwargs)
