@@ -26,15 +26,21 @@ async def main():
     # browser = await launch()
     page = await browser.newPage()
     await page.goto("https://term.ooo")
-    fechar = await page.querySelector("#helpclose")
+    fechar = await page.querySelector("#help")
     await fechar.click()
 
     tentativas = []
     resultados = []
-    tentativa = resolver([], [])
-    print("tentativa:", tentativa)
-    for linha in range(1, 7):
+    linha = 1
+    while linha < 7:
         resultado = ""
+        print("Procurando palavras...")
+        tentativa = resolver(tentativas, resultados, verboso=True)
+        if tentativa is None:
+            print("Oh no! sem mais achados!")
+            break
+        print("tentativa:", tentativa)
+
         await page.keyboard.type(f"{tentativa}\n")
         time.sleep(TAMANHO)
         for coluna in range(1, 6):
@@ -50,18 +56,19 @@ async def main():
             )
             resultado += cell_class[0]
             print(cell_class, tentativa[coluna - 1])
-
         tentativas.append(tentativa)
         resultados.append(resultado)
+
+        if cell_class == "empty":
+            print("Oh no! Palavra invalida")
+            for i in range(TAMANHO):
+                await page.keyboard.press("Backspace")
+            continue
+
+        linha += 1
         todas_corretas = set(resultado) == set("r")
         if todas_corretas:
             print("Achou!")
-            break
-
-        print("Procurando palavras...")
-        tentativa = resolver(tentativas, resultados, verboso=True)
-        if tentativa is None:
-            print("Oh no! sem mais achados!")
             break
 
     if not todas_corretas:

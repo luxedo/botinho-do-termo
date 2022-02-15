@@ -2,8 +2,8 @@ import random
 import termo
 
 TAMANHO = 5
-RODADAS = 200
-# termo.PALAVRAS_INICIAIS = 1
+RODADAS = 2000
+# RODADAS = 10
 
 
 def simular_jogo(palavra):
@@ -32,11 +32,12 @@ def simular_jogo(palavra):
 def testar():
     wordlist = termo.carregar_wordlist(TAMANHO, False)
     tf = termo.carregar_tf(TAMANHO, False)
+    mais_freq = [t for t, v in tf.items() if v > 10000]
     acertos = []
     for i in range(RODADAS):
-        palavra = random.choice(wordlist)[0]
+        palavra = random.choice(mais_freq)
         acertos.append(simular_jogo(palavra))
-    print(acertos)
+    print("Média de acertos")
     print(sum(acertos) / len(acertos))
 
 

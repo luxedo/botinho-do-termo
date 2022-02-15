@@ -7,7 +7,6 @@ musgo
 """
 from string import ascii_lowercase, digits
 import argparse
-from itertools import product
 from collections import Counter
 import math
 import os
@@ -119,14 +118,12 @@ def calcular_peso(palavra, ord_freq, tf, lf):
     return (
         palavra,
         tf.get(palavra),
-        # sum([(ord_freq.get(l, 0) + lf.get(l, 0)) for l in letras]),
-        sum([ord_freq.get(l, 0) for l in letras]),
+        sum([(ord_freq.get(l, 0) + lf.get(l, 0)) for l in letras]),
+        # sum([ord_freq.get(l, 0) for l in letras]),
     )
 
 
 def log_softmax(dados):
-    # d = np.array(dados)
-    # return np.exp(np.log(d + 1)) / d.sum()
     xp = [math.exp(math.log(x + 1)) for x in dados]
     soma = sum(xp)
     return [x / soma for x in xp]
@@ -138,6 +135,17 @@ def log_softmax_coluna(achados, coluna):
     return list(zip(*transposto))
 
 
+def gerar_frequencias(achados):
+    repete_em_todas = set(ascii_lowercase).intersection(*[set(a[0]) for a in achados])
+    return {
+        key: value
+        for key, value in dict(
+            Counter("".join(["".join(set(a[0])) for a in achados]))
+        ).items()
+        if key not in repete_em_todas
+    }
+
+
 def filtrar_wordlist(
     wordlist,
     tf,
@@ -146,32 +154,29 @@ def filtrar_wordlist(
     excluir,
     fixar,
     contem,
-    talvez_contenha=None,
+    talvez_contenha=set(),
     ord_freq=None,
 ):
+    contem = set([c for c in contem if all(c[1] != f[1] for f in fixar)])
+    letras_contem = set(c[1] for c in contem)
     possibilidades = [
-        # p for p, sw, sp in wordlist if (not sw & excluir) and (not sp - contem)
         p
         for p, sw, sp in wordlist
-        if (not sw & excluir) and ((fixar & sp) == fixar)
+        if (not sw & excluir)
+        and ((fixar & sp) == fixar)
+        and (not letras_contem - sw)
+        and (not contem & sp)
+        and (len(talvez_contenha) == 0 or sw & talvez_contenha)
     ]
-    # possibilidades = [p for p, sw in possibilidades if not s - contem]
-    # possibilidades = [
-    #     p for p in possibilidades if all(f == p[i] for i, f in fixar.items())
-    # ]
-    possibilidades = [p for p in possibilidades if all(c in p for i, c in contem)]
-    possibilidades = [p for p in possibilidades if all(c != p[i] for i, c in contem)]
-    if talvez_contenha:
-        achados = [p for p in possibilidades if any([t in p for t in talvez_contenha])]
 
     if len(possibilidades) == 0:
         return []
     tamanho = len(possibilidades[0])
     if ord_freq is None:
-        ord_freq = dict(Counter("".join(possibilidades)))
+        ord_freq = gerar_frequencias(possibilidades)
     achados = map(lambda p: calcular_peso(p, ord_freq, tf, lf), possibilidades)
     achados = log_softmax_coluna(achados, 1)
-    return sorted(achados, key=lambda row: (row[2], row[0]), reverse=True)
+    return sorted(achados, key=lambda row: (row[2], row[1]), reverse=True)
 
 
 def mostrar_palavras(achados, mostrar_pesos, ordenar_tf):
@@ -207,16 +212,7 @@ def procurar(
         return achados
 
     elif comando == "eliminar":
-        repete_em_todas = set(ascii_lowercase).intersection(
-            *[set(a[0]) for a in achados]
-        )
-        ord_freq = {
-            key: value
-            for key, value in dict(
-                Counter("".join(["".join(set(a[0])) for a in achados]))
-            ).items()
-            if key not in repete_em_todas
-        }
+        ord_freq = gerar_frequencias(achados)
         achados = filtrar_wordlist(
             wordlist,
             tf,
@@ -225,7 +221,7 @@ def procurar(
             excluir=set(),
             fixar=set(),
             contem=set(),
-            talvez_contenha=list(ord_freq),
+            talvez_contenha=set(ord_freq),
             ord_freq=ord_freq,
         )
         return achados
@@ -276,6 +272,8 @@ def gerar_argumentos(tentativas, resultados):
                 contem.add((i, letra))
             elif res == "r":
                 fixar.add((i, letra))
+            elif res == "e":
+                pass  # ignorar palavras que nao existem no dicio
             else:
                 raise ValueError("Resultado so pode ter 'r', 'w', ou 'p'")
     return excluir, fixar, contem
@@ -323,7 +321,7 @@ def resolver(tentativas, resultados, verboso=False):
         print(f"contem: {contem}")
 
     tamanho = len(tentativas[0])
-    linhas = len(tentativas)
+    linhas = len([r for r in resultados if r[0] != "e"])
     processar = not path.isfile(WORDLIST.format(n=tamanho))
     kwargs = {
         "tamanho": tamanho,
@@ -333,10 +331,11 @@ def resolver(tentativas, resultados, verboso=False):
         "contem": contem,
     }
     achados = procurar("listar", **kwargs)
+    achados = [a for a in achados if a[0] not in tentativas]
     if len(achados) == 0:
         return None
 
-    achados = sorted(achados, key=lambda x: (x[1], x[0]), reverse=True)
+    achados = sorted(achados, key=lambda x: (x[1], x[2]), reverse=True)
     if verboso:
         mais_provaveis = "\n".join(
             [f"{a[0]} - {a[1]:03f} - {a[2]:.3f}" for a in achados[:5]]
@@ -345,13 +344,14 @@ def resolver(tentativas, resultados, verboso=False):
 
     encontradas = set(c[1] for c in contem)
     if (
-        (len(achados) < 5 and achados[0][1] > 0.8)
+        (len(achados) < 20 and achados[0][1] > 0.8)
         or linhas == 5
         or (len(fixar) <= 2 and len(encontradas) >= 3)
     ):
         return achados[0][0]
     else:
         palavras_eliminar = procurar("eliminar", **kwargs)
+        palavras_eliminar = [a for a in achados if a[0] not in tentativas]
         if verboso:
             mais_provaveis = "\n".join(
                 [f"{a[0]} - {a[1]:03f} - {a[2]:.3f}" for a in palavras_eliminar[:5]]
