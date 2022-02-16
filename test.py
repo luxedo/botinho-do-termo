@@ -2,7 +2,7 @@ import random
 import termo
 
 TAMANHO = 5
-RODADAS = 2000
+RODADAS = 200
 # RODADAS = 10
 
 
@@ -31,8 +31,7 @@ def simular_jogo(palavra):
 
 def testar():
     wordlist = termo.carregar_wordlist(TAMANHO, False)
-    tf = termo.carregar_tf(TAMANHO, False)
-    mais_freq = [t for t, v in tf.items() if v > 10000]
+    mais_freq = [p[0] for p in wordlist if p[3] > 10000]
     acertos = []
     for i in range(RODADAS):
         palavra = random.choice(mais_freq)

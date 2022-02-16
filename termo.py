@@ -16,16 +16,12 @@ from sys import stderr
 from unidecode import unidecode
 
 LISTS_DIR = "dicionarios/"
-WORDLIST = LISTS_DIR + "wordlist_{n}.txt"
-TFLIST = LISTS_DIR + "tf_{n}.csv"
-WORDREPO = "pt-br/palavras"
-TFREPO = "pt-br/tf"
+WORDLIST = LISTS_DIR + "tf_{n}.txt"
+WORDREPO = "pt-br/tf"
 PALAVRAS_INICIAIS = 50
 
 
 cache_wordlist = None
-cache_tf = None
-cache_lf = None
 
 
 def carregar_wordlist(tamanho, processar):
@@ -38,18 +34,21 @@ def carregar_wordlist(tamanho, processar):
             print("Isso é feito apenas uma vez", file=stderr)
             with open(WORDLIST.format(n=tamanho), "w") as fw:
                 with open(WORDREPO, "r") as fr:
+                    dados = [l.split(",") for l in fr.read().strip().split("\n")]
                     fw.write(
                         "\n".join(
                             [
-                                unidecode(l)
-                                for l in fr.read().split("\n")
-                                if len(l) == tamanho
+                                f"{unidecode(p)},{f}"
+                                for p, f in dados
+                                if len(p) == 5 and int(f) > 0
                             ]
                         )
                     )
             print("Feito!", file=stderr)
         with open(WORDLIST.format(n=tamanho), "r") as fp:
-            cache_wordlist = fp.read().strip().split("\n")
+            cache_wordlist, freqs = zip(
+                *[l.split(",") for l in fp.read().strip().split("\n")]
+            )
             cache_wordlist = list(
                 zip(
                     cache_wordlist,
@@ -60,67 +59,15 @@ def carregar_wordlist(tamanho, processar):
                             cache_wordlist,
                         )
                     ),
+                    [int(f) for f in freqs],
                 )
             )
     return cache_wordlist
 
 
-def carregar_tf(tamanho, processar):
-    global cache_tf
-    if cache_tf is None:
-        if not path.isdir(LISTS_DIR):
-            os.makedirs(LISTS_DIR)
-        if not path.isfile(TFLIST.format(n=tamanho)) or processar:
-            print(
-                "Pré processando frequencias das palavras... aguarde puvafô",
-                file=stderr,
-            )
-            print("Isso é feito apenas uma vez", file=stderr)
-            with open(TFLIST.format(n=tamanho), "w") as fw:
-                with open(TFREPO, "r") as fr:
-                    palavras = [l.split(",") for l in fr.read().split("\n")]
-                    palavras = [
-                        f"{unidecode(p[0])},{p[1]}"
-                        for p in palavras
-                        if len(p[0]) == tamanho
-                    ]
-                    fw.write("\n".join(palavras))
-            print("Feito!", file=stderr)
-        with open(TFLIST.format(n=tamanho), "r") as fp:
-            cache_tf = dict(
-                map(
-                    lambda p: (p[0], int(p[1])),
-                    [t.split(",") for t in fp.read().strip().split("\n")],
-                )
-            )
-    return cache_tf
-
-
-def carregar_lf(wordlist):
-    global cache_lf
-    if cache_lf is None:
-        cache_lf = {
-            f[0]: (len(ascii_lowercase) - i)
-            / len(ascii_lowercase)
-            / len(wordlist[0][0])
-            for i, f in enumerate(
-                sorted(
-                    Counter("".join(list(zip(*wordlist))[0])).most_common(),
-                    key=lambda x: -x[1],
-                )
-            )
-        }
-    return cache_lf
-
-
-def calcular_peso(palavra, ord_freq, tf, lf):
+def calcular_peso(palavra, ord_freq):
     letras = set(palavra)
-    return (
-        palavra,
-        tf.get(palavra),
-        sum([(ord_freq.get(l, 0) + lf.get(l, 0)) for l in letras]),
-        # sum([ord_freq.get(l, 0) for l in letras]),
-    )
+    return sum([ord_freq.get(l, 0) for l in letras])
 
 
 def log_softmax(dados):
@@ -148,8 +95,6 @@ def gerar_frequencias(achados):
 
 def filtrar_wordlist(
     wordlist,
-    tf,
-    lf,
     tamanho,
     excluir,
     fixar,
@@ -160,8 +105,8 @@ def filtrar_wordlist(
     contem = set([c for c in contem if all(c[1] != f[1] for f in fixar)])
     letras_contem = set(c[1] for c in contem)
     possibilidades = [
-        p
-        for p, sw, sp in wordlist
+        (p, f)
+        for p, sw, sp, f in wordlist
         if (not sw & excluir)
         and ((fixar & sp) == fixar)
         and (not letras_contem - sw)
@@ -174,7 +119,7 @@ def filtrar_wordlist(
     tamanho = len(possibilidades[0])
     if ord_freq is None:
         ord_freq = gerar_frequencias(possibilidades)
-    achados = map(lambda p: calcular_peso(p, ord_freq, tf, lf), possibilidades)
+    achados = map(lambda p: [p[0], calcular_peso(p[0], ord_freq), p[1]], possibilidades)
     achados = log_softmax_coluna(achados, 1)
     return sorted(achados, key=lambda row: (row[2], row[1]), reverse=True)
 
@@ -203,10 +148,7 @@ def procurar(
     contem,
 ):
     wordlist = carregar_wordlist(tamanho, processar)
-    tf = carregar_tf(tamanho, processar)
-    lf = carregar_lf(wordlist)
-
-    achados = filtrar_wordlist(wordlist, tf, lf, tamanho, excluir, fixar, contem)
+    achados = filtrar_wordlist(wordlist, tamanho, excluir, fixar, contem)
 
     if comando == "listar":
         return achados
@@ -215,8 +157,6 @@ def procurar(
         ord_freq = gerar_frequencias(achados)
         achados = filtrar_wordlist(
             wordlist,
-            tf,
-            lf,
             tamanho,
             excluir=set(),
             fixar=set(),
