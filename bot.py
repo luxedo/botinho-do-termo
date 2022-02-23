@@ -57,7 +57,7 @@ def main():
             time.sleep(TAMANHO)
             for coluna in range(1, 6):
                 cell = page.locator(
-                    f"body > main > wc-board > wc-row:nth-child({linha+1}) > div:nth-child({coluna+1})"
+                    f"wc-board > #hold > wc-row:nth-child({linha}) > div:nth-child({coluna+1})"
                 )
                 cell_class = (
                     cell.get_attribute("class")
@@ -90,8 +90,7 @@ def main():
                 print(palavra)
         compartilhar = page.locator("#stats_share")
         compartilhar.click()
-        print(pyperclip.paste())
-
+        print("\n" + pyperclip.paste())
         browser.close()
 
 
