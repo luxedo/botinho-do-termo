@@ -269,7 +269,7 @@ def resolver(tentativas, resultados, tamanho, verboso=False):
     if verboso:
         print(f"resolver({tentativas}, {resultados}, verboso={verboso})")
 
-    if len(tentativas) == 0:
+    if len([r for r in resultados if r[0] != "e"]) == 0:
         return chute_inicial(tamanho)
     excluir, fixar, contem = gerar_argumentos(tentativas, resultados)
 
