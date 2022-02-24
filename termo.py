@@ -34,13 +34,17 @@ cache_wordlist = None
 @dataclass
 class Palavra:
     palavra: str
-    letras: set
-    posicoes: set
     tf: int
+    letras: set = None
+    posicoes: set = None
     pesos: int = 0
     sf_tf: float = 0
     sf_pesos: float = 0
     prob: float = 0
+
+    def __post_init__(self):
+        self.letras = set(self.palavra)
+        self.posicoes = set((i, l) for i, l in enumerate(self.palavra))
 
     def __str__(self):
         return f"{self.palavra:>7} | {self.tf:>8} | {self.pesos:>5} | {self.sf_tf:.03f} | {self.sf_pesos:.03f} | {self.prob:.03f}"
@@ -68,23 +72,8 @@ def carregar_wordlist(tamanho, frequencia_minima, processar):
                     )
             print("Feito!", file=stderr)
         with open(WORDLIST.format(n=tamanho), "r") as fp:
-            cache_wordlist, freqs = zip(
-                *[l.split(",") for l in fp.read().strip().split("\n")]
-            )
-            cache_wordlist = list(
-                Palavra(*p)
-                for p in zip(
-                    cache_wordlist,
-                    list(map(set, cache_wordlist)),
-                    list(
-                        map(
-                            lambda palavra: set((i, l) for i, l in enumerate(palavra)),
-                            cache_wordlist,
-                        )
-                    ),
-                    [int(f) for f in freqs],
-                )
-            )
+            word_freq = [l.split(",") for l in fp.read().strip().split("\n")]
+            cache_wordlist = [Palavra(w, int(f)) for w, f in word_freq]
     return cache_wordlist
 
 
@@ -107,6 +96,7 @@ def filtrar_wordlist(
     excluir,
     fixar,
     contem,
+    remover_palavras,
     talvez_contenha=set(),
     ord_freq=None,
 ):
@@ -121,6 +111,7 @@ def filtrar_wordlist(
         if (p.posicoes & (excluir | contem) == set())
         and (p.posicoes & fixar == fixar)
         and (letras_contem - p.letras == set())
+        and (p.palavra not in remover_palavras)
     ]
 
     if len(possibilidades) == 0:
@@ -132,16 +123,20 @@ def filtrar_wordlist(
     for i, p in enumerate(possibilidades):
         p.pesos = sum(ord_freq.get(l, 0) for l in p.letras)
 
-    exp_log_tf = np.exp(np.log([p.tf for p in possibilidades]))
+    exp_log_tf = np.exp(np.log([1 + p.tf for p in possibilidades]))
     exp_log_tf_sum = exp_log_tf.sum()
     exp_log_pesos = np.exp(np.log([1 + p.pesos for p in possibilidades]))
     exp_log_pesos_sum = exp_log_pesos.sum()
     for i, p in enumerate(possibilidades):
         p.sf_tf = exp_log_tf[i] / exp_log_tf_sum
         p.sf_pesos = exp_log_pesos[i] / exp_log_pesos_sum
-        p.prob = p.sf_tf * p.sf_pesos
-    # return sorted(possibilidades, key=lambda p: (-p.pesos, -p.tf))
-    # return sorted(possibilidades, key=lambda p: (-p.tf, -p.pesos))
+        p.prob = p.sf_tf + p.sf_pesos
+
+    exp_prob = np.exp([1 + p.prob for p in possibilidades])
+    exp_prob_sum = exp_prob.sum()
+    for i, p in enumerate(possibilidades):
+        p.prob = exp_prob[i] / exp_prob_sum
+
     return sorted(possibilidades, key=lambda p: (-p.prob, -p.pesos))
 
 
@@ -157,15 +152,12 @@ def mostrar_palavras(possibilidades, mostrar_pesos, ordenar_tf):
 
 
 def procurar(
-    comando,
-    tamanho,
-    processar,
-    excluir,
-    fixar,
-    contem,
+    comando, tamanho, processar, excluir, fixar, contem, remover_palavras=set()
 ):
     wordlist = carregar_wordlist(tamanho, FREQUENCIA_MINIMA, processar)
-    possibilidades = filtrar_wordlist(wordlist, tamanho, excluir, fixar, contem)
+    possibilidades = filtrar_wordlist(
+        wordlist, tamanho, excluir, fixar, contem, remover_palavras
+    )
 
     if comando == "listar":
         return possibilidades
@@ -178,6 +170,7 @@ def procurar(
             excluir=set(),
             fixar=set(),
             contem=contem,
+            remover_palavras=remover_palavras,
             talvez_contenha=set(ord_freq),
             ord_freq=ord_freq,
         )
@@ -204,7 +197,7 @@ def chute_inicial(tamanho):
             fixar=set(),
             contem=set(),
         )
-    return random.choice(cache_palavras).palavra
+    return random.choice(cache_palavras[:PALAVRAS_INICIAIS])
 
 
 def gerar_argumentos(tentativas, resultados):
@@ -223,6 +216,7 @@ def gerar_argumentos(tentativas, resultados):
                         resultado[i] for i in range(tamanho) if letra == palavra[i]
                     ]
                     if set(conflitos) != set("w"):
+                        contem.add((i, letra))
                         continue
                 for j in range(tamanho):
                     excluir.add((j, letra))
@@ -241,7 +235,7 @@ def testar(palavra, verboso):
     tentativas = []
     resultados = []
     for i in range(1, 7):
-        tentativa = resolver(tentativas, resultados, len(palavra), verboso)
+        tentativa = resolver(tentativas, resultados, len(palavra), verboso).palavra
         resultado = ""
         for l, t in zip(palavra, tentativa):
             if l == t:
@@ -287,11 +281,9 @@ def resolver(tentativas, resultados, tamanho, verboso=False):
         "excluir": excluir,
         "fixar": fixar,
         "contem": contem,
+        "remover_palavras": tentativas,
     }
     possibilidades = procurar("listar", **kwargs)
-    possibilidades = [p for p in possibilidades if p not in tentativas]
-
-    # possibilidades = sorted(possibilidades, key=lambda p: (-p.tf, -p.pesos))
 
     if len(possibilidades) == 0:
         return None
@@ -301,28 +293,45 @@ def resolver(tentativas, resultados, tamanho, verboso=False):
             f"Encontrou {len(possibilidades)} palavras. Mais provaveis:\n{HEAD}\n"
             + "\n".join(str(p) for p in possibilidades[:5]),
         )
-    return possibilidades[0].palavra
-
-    encontradas = set(c[1] for c in contem)
-    if (
-        (len(possibilidades) < 20 and max([p.sf_tf for p in possibilidades]) > 0.8)
-        or linhas == 5
-        or (len(fixar) <= 2 and len(encontradas) >= 3)
-    ):
-        return possibilidades[0].palavra
+    melhor_peso = sorted(possibilidades, key=lambda p: (-p.pesos, -p.tf))[0]
+    melhor_tf = sorted(possibilidades, key=lambda p: (-p.tf, -p.pesos))[0]
+    if melhor_tf.sf_tf > 0.9:
+        return melhor_tf
     else:
-        palavras_eliminar = procurar("eliminar", **kwargs)
-        palavras_eliminar = [p for p in palavras_eliminar if p not in tentativas]
-        if verboso:
-            print(
-                f"Encontrou {len(palavras_eliminar)} palavras. Mais provaveis:\n{HEAD}\n"
-                + "\n".join(str(p) for p in palavras_eliminar[:5]),
-            )
-        if len(palavras_eliminar) >= 1:
-            return palavras_eliminar[0].palavra
-        else:
-            return possibilidades[0].palavra
-    return None  # Não deve chegar aqui hein
+        return melhor_peso
+    # if possibilidades[0].tf > 0.9:
+    #     return possibilidades[0]
+    # else:
+    #     return sorted(possibilidades, key=lambda p: (-p.pesos, -p.tf))[0]
+
+    # else:
+    #     palavras_eliminar = procurar("eliminar", **kwargs)
+    #     palavras_eliminar = sorted(palavras_eliminar, key=lambda p: (-p.pesos, -p.tf))
+    #     if len(palavras_eliminar) >= 1:
+    #         return palavras_eliminar[0]
+    #     else:
+    #         return possibilidades[0]
+
+    # encontradas = set(c[1] for c in contem)
+    # if (
+    #     (len(possibilidades) < 20 and max([p.sf_tf for p in possibilidades]) > 0.8)
+    #     or linhas == 5
+    #     or (len(fixar) <= 2 and len(encontradas) >= 3)
+    # ):
+    #     return possibilidades[0].palavra
+    # else:
+    #     palavras_eliminar = procurar("eliminar", **kwargs)
+    #     palavras_eliminar = [p for p in palavras_eliminar if p not in tentativas]
+    #     if verboso:
+    #         print(
+    #             f"Encontrou {len(palavras_eliminar)} palavras. Mais provaveis:\n{HEAD}\n"
+    #             + "\n".join(str(p) for p in palavras_eliminar[:5]),
+    #         )
+    #     if len(palavras_eliminar) >= 1:
+    #         return palavras_eliminar[0].palavra
+    #     else:
+    #         return possibilidades[0].palavra
+    # return None  # Não deve chegar aqui hein
 
 
 def tupla_numero_letra(strings):

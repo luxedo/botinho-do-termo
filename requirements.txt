@@ -1,2 +1,2 @@
-pyperclip==1.8.1
-pyppeteer==1.0.2
+playwright==1.19.0
+
