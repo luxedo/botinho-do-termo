@@ -10,7 +10,6 @@ Cansei de apanhar no termo.
 import argparse
 from collections import Counter
 from dataclasses import dataclass
-import math
 import os
 from os import path
 import random
@@ -97,17 +96,12 @@ def filtrar_wordlist(
     fixar,
     contem,
     remover_palavras,
-    talvez_contenha=set(),
     ord_freq=None,
 ):
     letras_contem = set(l[1] for l in contem)
-    if talvez_contenha:
-        possibilidades = [p for p in wordlist if talvez_contenha & p.letras != set()]
-    else:
-        possibilidades = wordlist
     possibilidades = [
         p
-        for p in possibilidades
+        for p in wordlist
         if (p.posicoes & (excluir | contem) == set())
         and (p.posicoes & fixar == fixar)
         and (letras_contem - p.letras == set())
@@ -116,7 +110,6 @@ def filtrar_wordlist(
 
     if len(possibilidades) == 0:
         return None
-    tamanho = len(possibilidades[0].palavra)
     if ord_freq is None:
         ord_freq = gerar_frequencias(possibilidades)
 
@@ -169,9 +162,8 @@ def procurar(
             tamanho,
             excluir=set(),
             fixar=set(),
-            contem=contem,
+            contem=set(),
             remover_palavras=remover_palavras,
-            talvez_contenha=set(ord_freq),
             ord_freq=ord_freq,
         )
         return possibilidades
@@ -184,10 +176,11 @@ def procurar(
 
 
 cache_palavras = None
+cache_sort = None
 
 
 def chute_inicial(tamanho):
-    global cache_palavras
+    global cache_palavras, cache_sort
     if cache_palavras is None:
         cache_palavras = procurar(
             comando="eliminar",
@@ -197,7 +190,8 @@ def chute_inicial(tamanho):
             fixar=set(),
             contem=set(),
         )
-    return random.choice(cache_palavras[:PALAVRAS_INICIAIS])
+        cache_sort = sorted(cache_palavras, key=lambda p: (-p.pesos, -p.tf))
+    return random.choice(cache_sort[:PALAVRAS_INICIAIS])
 
 
 def gerar_argumentos(tentativas, resultados):
@@ -236,6 +230,8 @@ def testar(palavra, verboso):
     resultados = []
     for i in range(1, 7):
         tentativa = resolver(tentativas, resultados, len(palavra), verboso).palavra
+        if verboso:
+            print(f"Tentativa: {tentativa}")
         resultado = ""
         for l, t in zip(palavra, tentativa):
             if l == t:
@@ -273,7 +269,6 @@ def resolver(tentativas, resultados, tamanho, verboso=False):
         print(f"contem: {contem}")
 
     tamanho = len(tentativas[0])
-    linhas = len([r for r in resultados if r[0] != "e"])
     processar = not path.isfile(WORDLIST.format(n=tamanho))
     kwargs = {
         "tamanho": tamanho,
@@ -297,41 +292,12 @@ def resolver(tentativas, resultados, tamanho, verboso=False):
     melhor_tf = sorted(possibilidades, key=lambda p: (-p.tf, -p.pesos))[0]
     if melhor_tf.sf_tf > 0.9:
         return melhor_tf
-    else:
-        return melhor_peso
-    # if possibilidades[0].tf > 0.9:
-    #     return possibilidades[0]
-    # else:
-    #     return sorted(possibilidades, key=lambda p: (-p.pesos, -p.tf))[0]
-
-    # else:
-    #     palavras_eliminar = procurar("eliminar", **kwargs)
-    #     palavras_eliminar = sorted(palavras_eliminar, key=lambda p: (-p.pesos, -p.tf))
-    #     if len(palavras_eliminar) >= 1:
-    #         return palavras_eliminar[0]
-    #     else:
-    #         return possibilidades[0]
-
-    # encontradas = set(c[1] for c in contem)
-    # if (
-    #     (len(possibilidades) < 20 and max([p.sf_tf for p in possibilidades]) > 0.8)
-    #     or linhas == 5
-    #     or (len(fixar) <= 2 and len(encontradas) >= 3)
-    # ):
-    #     return possibilidades[0].palavra
-    # else:
-    #     palavras_eliminar = procurar("eliminar", **kwargs)
-    #     palavras_eliminar = [p for p in palavras_eliminar if p not in tentativas]
-    #     if verboso:
-    #         print(
-    #             f"Encontrou {len(palavras_eliminar)} palavras. Mais provaveis:\n{HEAD}\n"
-    #             + "\n".join(str(p) for p in palavras_eliminar[:5]),
-    #         )
-    #     if len(palavras_eliminar) >= 1:
-    #         return palavras_eliminar[0].palavra
-    #     else:
-    #         return possibilidades[0].palavra
-    # return None  # Não deve chegar aqui hein
+    elif len(set(p.pesos for p in possibilidades)) == 1 and len(possibilidades) > 3:
+        palavras_eliminar = procurar("eliminar", **kwargs)
+        palavras_eliminar = sorted(palavras_eliminar, key=lambda p: (-p.pesos, -p.tf))
+        if len(palavras_eliminar) >= 1:
+            return palavras_eliminar[0]
+    return melhor_peso
 
 
 def tupla_numero_letra(strings):
